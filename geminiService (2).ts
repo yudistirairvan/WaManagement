@@ -7,7 +7,6 @@ export const getAIResponse = async (
   config: SMEConfig, 
   customApiKey?: string | null
 ): Promise<string | null> => {
-  // Prioritas: 1. Custom API Key (dari UI), 2. Environment Variable
   const apiKey = customApiKey || process.env.API_KEY;
   
   if (!apiKey) {
@@ -18,45 +17,57 @@ export const getAIResponse = async (
   try {
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
+    // Format knowledge base untuk konteks
     const knowledgeContext = config.knowledgeBase
-      .map(item => `- [${item.category}]: ${item.content}`)
+      .map(item => `[${item.category}]: ${item.content}`)
       .join('\n');
 
-    const systemInstruction = `
-      Anda adalah asisten cerdas untuk "${config.businessName}".
-      Profil Bisnis: ${config.description}
-      
-      BASIS DATA PENGETAHUAN:
-      ${knowledgeContext || "Tidak ada data spesifik."}
+    const systemInstruction = `Anda adalah asisten WhatsApp resmi untuk "${config.businessName}". 
+Profil Bisnis: ${config.description}.
+Gaya Bicara: ${config.autoReplyPrompt}.
 
-      INSTRUKSI:
-      1. Jawab HANYA berdasarkan DATA PENGETAHUAN di atas secara singkat dan padat.
-      2. Jika pertanyaan tidak ada di data, jawab: "Maaf, saya tidak memiliki informasi tersebut. Mohon tunggu admin kami membantu Anda secara manual."
-      3. Gaya bahasa: ${config.autoReplyPrompt}.
-      4. Gunakan Bahasa Indonesia yang ramah.
-      5. JANGAN menyertakan label teknis seperti "Error" atau "System" dalam jawaban Anda.
-    `;
+DATA RESMI TOKO (KNOWLEDGE BASE):
+${knowledgeContext || "Tidak ada data khusus yang tersimpan."}
+
+ATURAN JAWABAN:
+1. PERIKSA DATA RESMI: Jika pertanyaan pelanggan dapat dijawab menggunakan DATA RESMI TOKO di atas, berikan jawaban langsung tanpa catatan tambahan.
+2. JAWABAN UMUM: Jika informasi TIDAK DITEMUKAN di DATA RESMI TOKO, Anda boleh menjawab menggunakan pengetahuan umum Anda yang relevan dengan bisnis ini. Namun, Anda WAJIB menambahkan catatan disclaimer di baris paling bawah.
+3. FORMAT DISCLAIMER: Gunakan garis pemisah dan teks berikut tepat di bagian akhir jawaban umum:
+---
+(Catatan: Jawaban ini dihasilkan oleh AI asisten. Mohon hubungi admin langsung jika memerlukan informasi resmi lebih lanjut.)
+
+4. BATASAN: Jika pertanyaan tidak sopan atau sangat jauh dari konteks bisnis, jawab: "Maaf, saya tidak memiliki informasi mengenai hal tersebut."
+5. Gunakan Bahasa Indonesia yang natural dan ramah.`;
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: userInput,
       config: {
         systemInstruction: systemInstruction,
-        temperature: 0.1, // Suhu rendah untuk konsistensi
+        temperature: 0.4,
+        topP: 0.9,
       },
     });
 
     const resultText = response.text?.trim();
     
-    // Pastikan tidak mengirim pesan kosong atau pesan sistem yang tidak diinginkan
-    if (!resultText || resultText.length < 2) {
+    if (!resultText) {
+      console.warn("Gemini Service: Empty response text received");
       return null;
     }
 
     return resultText;
   } catch (error: any) {
-    // Log di konsol browser saja, jangan kirim string error ke UI/Pelanggan
-    console.error("Gemini API Error:", error?.message);
+    console.error("Gemini API Error Detail:", {
+      message: error?.message,
+      status: error?.status,
+    });
+    
+    // Memberikan feedback jika terjadi error server
+    if (error?.message?.includes('500') || error?.message?.includes('503')) {
+      return "Sistem AI kami sedang mengalami gangguan teknis (Server Busy). Mohon tunggu beberapa saat lagi atau hubungi admin secara manual.";
+    }
+    
     return null; 
   }
 };
