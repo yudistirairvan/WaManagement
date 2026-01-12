@@ -1,0 +1,7 @@
+{
+  "name": "UMKM WhatsApp AI Manager",
+  "description": "A comprehensive dashboard for SMEs to manage WhatsApp communications, send bulk messages (blast), and configure an intelligent AI chatbot powered by Gemini.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}

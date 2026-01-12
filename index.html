@@ -1,0 +1,68 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard WA UMKM - Baileys & Gemini AI</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2310b981'><path d='M12 2C6.48 2 2 6.48 2 12c0 2.17.76 4.19 2.04 5.79L3 21l3.21-1.04C7.81 21.24 9.83 22 12 22c5.52 0 10-4.48 10-10S17.52 2 12 2zm0 18c-1.97 0-3.8-.64-5.29-1.74l-.38-.28-1.9.61.62-1.86-.3-.41C3.64 15.8 3 13.97 3 12c0-4.96 4.04-9 9-9s9 4.04 9 9-4.04 9-9 9z'/></svg>">
+    
+    <!-- Tailwind CSS v4 Engine -->
+    <script src="https://unpkg.com/@tailwindcss/browser@4"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style type="text/css">
+        @import "tailwindcss";
+
+        @theme {
+            --font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+            --color-emerald-50: #ecfdf5;
+            --color-emerald-100: #d1fae5;
+            --color-emerald-500: #10b981;
+            --color-emerald-600: #059669;
+            --color-emerald-700: #047857;
+            --color-emerald-800: #065f46;
+        }
+
+        @layer base {
+            body {
+                @apply bg-slate-50 text-slate-900 antialiased;
+                font-family: var(--font-sans);
+            }
+        }
+
+        @layer components {
+            ::-webkit-scrollbar { width: 6px; }
+            ::-webkit-scrollbar-track { background: transparent; }
+            ::-webkit-scrollbar-thumb { 
+                @apply bg-slate-200 rounded-full;
+            }
+            ::-webkit-scrollbar-thumb:hover { 
+                @apply bg-slate-300;
+            }
+        }
+    </style>
+
+    <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom": "https://esm.sh/react-dom@19.0.0",
+    "react-dom/client": "https://esm.sh/react-dom@19.0.0/client",
+    "@google/genai": "https://esm.sh/@google/genai@0.2.1",
+    "socket.io-client": "https://esm.sh/socket.io-client@4.7.5",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+    <!-- Load index.tsx as a module directly -->
+    <script type="module" src="index.tsx"></script>
+</body>
+</html>
