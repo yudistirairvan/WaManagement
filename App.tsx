@@ -9,6 +9,9 @@ import { io, Socket } from "socket.io-client";
 import { Sidebar } from './components/Sidebar';
 import { ChatView } from './components/ChatView';
 import { KnowledgeView } from './components/KnowledgeView';
+import { BlastView } from './components/BlastView';
+import { SettingsView } from './components/SettingsView';
+import { ContactsView } from './components/ContactsView';
 
 const DEFAULT_SOCKET_URL = "http://localhost:4000";
 
@@ -24,7 +27,7 @@ const App: React.FC = () => {
   
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState('');
-  const [activeTab, setActiveTab] = useState<'chats' | 'blast' | 'knowledge' | 'settings'>('chats');
+  const [activeTab, setActiveTab] = useState<'chats' | 'blast' | 'knowledge' | 'settings' | 'contacts'>('chats');
   const [isScannerOpen, setIsScannerOpen] = useState(false);
   const [baileysStatus, setBaileysStatus] = useState<'initial' | 'qr' | 'connecting' | 'connected' | 'error'>('initial');
   const [qrCode, setQrCode] = useState<string | null>(null);
@@ -48,7 +51,6 @@ const App: React.FC = () => {
   const apiKeyRef = useRef(geminiApiKey);
   const processedMessageIds = useRef<Set<string>>(new Set());
   const socketRef = useRef<Socket | null>(null);
-  const lastNudgeTime = useRef<number>(0);
 
   useEffect(() => {
     configRef.current = config;
@@ -65,15 +67,12 @@ const App: React.FC = () => {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [inputText, setInputText] = useState('');
   
-  const [blastText, setBlastText] = useState('');
-  const [isBlasting, setIsBlasting] = useState(false);
-  
   const [newKItem, setNewKItem] = useState({ category: '', content: '' });
   const [editingKItem, setEditingKItem] = useState<string | null>(null);
 
   const sendMessage = useCallback((text: string, contactId: string, isAi = false) => {
     if (!text || !text.trim()) return;
-    if (!isAi && socketRef.current && socketRef.current.connected) {
+    if (!isAi && socketRef.current?.connected) {
       socketRef.current.emit("send_message", { jid: contactId, text: text });
     }
     const newMessage: Message = {
@@ -83,6 +82,18 @@ const App: React.FC = () => {
     };
     setMessages(prev => ({ ...prev, [contactId]: [...(prev[contactId] || []), newMessage] }));
     if (!isAi) setInputText('');
+  }, []);
+
+  const triggerContactSync = useCallback(() => {
+    if (socketRef.current?.connected) {
+      console.log("🚀 Requesting full contact sync from server...");
+      setIsSyncingContacts(true);
+      socketRef.current.emit("whatsapp_get_contacts");
+      // Safety timeout extended for slow Baileys stores
+      setTimeout(() => setIsSyncingContacts(false), 20000);
+    } else {
+      alert("Socket tidak terhubung ke server.");
+    }
   }, []);
 
   const handleReconnect = useCallback(() => {
@@ -113,27 +124,113 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!currentUser) return;
-    const newSocket = io(backendUrl, { transports: ['websocket'], reconnection: true });
+    
+    console.log("🔌 Initializing Socket Connection to:", backendUrl);
+    const newSocket = io(backendUrl, { 
+      transports: ['polling', 'websocket'], 
+      reconnection: true,
+      reconnectionAttempts: 10,
+      forceNew: true,
+      timeout: 20000
+    });
+    
     socketRef.current = newSocket;
-    newSocket.on("connect", () => { setIsSocketConnected(true); newSocket.emit("whatsapp_get_status"); });
-    newSocket.on("disconnect", () => { setIsSocketConnected(false); setBaileysStatus('initial'); });
-    newSocket.on("whatsapp_qr", (qr) => { setQrCode(qr); setBaileysStatus('qr'); setIsScannerOpen(true); });
-    newSocket.on("whatsapp_status", (s) => {
+
+    const onConnect = () => { 
+      console.log("✅ Socket Connected Successfully");
+      setIsSocketConnected(true); 
+      newSocket.emit("whatsapp_get_status"); 
+    };
+
+    const onDisconnect = (reason: string) => { 
+      console.log("❌ Socket Disconnected:", reason);
+      setIsSocketConnected(false); 
+      setBaileysStatus('initial'); 
+    };
+
+    const onConnectError = (error: Error) => {
+      console.error("⚠️ Socket Connection Error:", error.message);
+      setIsSocketConnected(false);
+    };
+
+    const onQr = (qr: string) => { 
+      console.log("📲 New QR Code received");
+      setQrCode(qr); 
+      setBaileysStatus('qr'); 
+      setIsScannerOpen(true); 
+    };
+
+    const onStatus = (s: string) => {
+      console.log("📊 WhatsApp Status Update:", s);
       const norm = s === 'open' ? 'connected' : s;
       setBaileysStatus(norm as any);
-      if (norm === 'connected') { setIsScannerOpen(false); setQrCode(null); newSocket.emit("whatsapp_get_contacts"); }
-    });
-    newSocket.on("whatsapp_contacts", (data) => {
+      if (norm === 'connected') { 
+        setIsScannerOpen(false); 
+        setQrCode(null); 
+        // Delay sync significantly to wait for Baileys data load
+        console.log("⏳ Waiting 5s before auto-syncing contacts...");
+        setTimeout(() => {
+          if (newSocket.connected) {
+            console.log("🔄 Auto-syncing contacts...");
+            newSocket.emit("whatsapp_get_contacts");
+          }
+        }, 5000);
+      }
+    };
+
+    const onContacts = (data: any) => {
+      console.log("📦 Raw data from whatsapp_contacts event:", data);
       setIsSyncingContacts(false);
-      setContacts(data.map((c: any) => ({ id: c.id || c.jid, name: c.name || "", phone: (c.id || c.jid || "").split('@')[0], unreadCount: 0 })));
-    });
-    newSocket.on("whatsapp_message", async (msg: any) => {
+      
+      if (Array.isArray(data)) {
+        const contactMap = new Map();
+        data.forEach((c: any) => {
+          if (!c) return;
+          const jid = c.id || c.jid;
+          if (!jid) return;
+
+          // Filter: only individual contacts, ignore groups (@g.us), broadcast lists (@broadcast), etc.
+          const isPersonal = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@c.us') || !jid.includes('@');
+          
+          if (isPersonal) {
+            const cleanPhone = jid.split('@')[0];
+            contactMap.set(jid, { 
+              id: jid, 
+              name: c.name || c.verifiedName || c.notify || cleanPhone, 
+              phone: cleanPhone, 
+              unreadCount: 0 
+            });
+          }
+        });
+        
+        const finalContacts = Array.from(contactMap.values());
+        console.log("✨ Processed contacts count:", finalContacts.length);
+        setContacts(finalContacts);
+      } else {
+        console.warn("⚠️ Received non-array data for contacts:", typeof data);
+      }
+    };
+
+    const onMessage = async (msg: any) => {
       const contactId = msg.key?.remoteJid;
       if (!contactId || msg.key?.fromMe) return;
+      
       const text = msg.message?.conversation || msg.message?.extendedTextMessage?.text;
       if (!text || processedMessageIds.current.has(msg.key.id)) return;
+      
       processedMessageIds.current.add(msg.key.id);
-      setMessages(prev => ({ ...prev, [contactId]: [...(prev[contactId] || []), { id: msg.key.id, sender: contactId.split('@')[0], text, timestamp: new Date(), isMine: false }] }));
+      
+      setMessages(prev => ({ 
+        ...prev, 
+        [contactId]: [...(prev[contactId] || []), { 
+          id: msg.key.id, 
+          sender: contactId.split('@')[0], 
+          text, 
+          timestamp: new Date(), 
+          isMine: false 
+        }] 
+      }));
+
       if (configRef.current.autoReplyEnabled) {
         const aiRes = await getAIResponse(text, configRef.current, apiKeyRef.current);
         if (aiRes && socketRef.current?.connected) {
@@ -141,8 +238,28 @@ const App: React.FC = () => {
           socketRef.current.emit("send_message", { jid: contactId, text: aiRes });
         }
       }
-    });
-    return () => { newSocket.close(); };
+    };
+
+    newSocket.on("connect", onConnect);
+    newSocket.on("disconnect", onDisconnect);
+    newSocket.on("connect_error", onConnectError);
+    newSocket.on("whatsapp_qr", onQr);
+    newSocket.on("whatsapp_status", onStatus);
+    newSocket.on("whatsapp_contacts", onContacts);
+    newSocket.on("whatsapp_message", onMessage);
+
+    return () => {
+      console.log("🧹 Unmounting: Closing Socket");
+      newSocket.off("connect", onConnect);
+      newSocket.off("disconnect", onDisconnect);
+      newSocket.off("connect_error", onConnectError);
+      newSocket.off("whatsapp_qr", onQr);
+      newSocket.off("whatsapp_status", onStatus);
+      newSocket.off("whatsapp_contacts", onContacts);
+      newSocket.off("whatsapp_message", onMessage);
+      newSocket.disconnect();
+      socketRef.current = null;
+    };
   }, [currentUser, backendUrl, sendMessage]);
 
   if (!currentUser) {
@@ -182,32 +299,37 @@ const App: React.FC = () => {
           <ChatView 
             contacts={contacts} messages={messages} selectedContact={selectedContact}
             setSelectedContact={setSelectedContact} searchTerm={searchTerm} setSearchTerm={setSearchTerm}
-            isSyncingContacts={isSyncingContacts} onSyncContacts={() => { setIsSyncingContacts(true); socketRef.current?.emit("whatsapp_get_contacts"); }}
+            isSyncingContacts={isSyncingContacts} onSyncContacts={triggerContactSync}
             inputText={inputText} setInputText={setInputText} onSendMessage={sendMessage}
           />
         )}
 
+        {activeTab === 'contacts' && (
+          <ContactsView 
+            contacts={contacts} 
+            isSyncing={isSyncingContacts} 
+            onSync={triggerContactSync}
+            onSelectChat={(contact) => {
+              setSelectedContact(contact);
+              setActiveTab('chats');
+            }}
+          />
+        )}
+
         {activeTab === 'blast' && (
-          <div className="p-10 max-w-4xl mx-auto w-full overflow-y-auto">
-            <h2 className="text-2xl font-black mb-8 uppercase tracking-tight">WhatsApp Blast</h2>
-            <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm space-y-6">
-                <textarea value={blastText} onChange={e => setBlastText(e.target.value)} placeholder="Tulis pesan promosi..." className="w-full p-6 bg-slate-50 border-none rounded-3xl h-48 outline-none text-sm focus:ring-2 focus:ring-emerald-500/10 transition-all" />
-                <button 
-                  onClick={() => {
-                    if (!blastText.trim() || !socketRef.current?.connected) return;
-                    setIsBlasting(true);
-                    socketRef.current.emit("whatsapp_blast", { jids: contacts.map(c => c.id), text: blastText });
-                    setTimeout(() => { setIsBlasting(false); setBlastText(''); alert("Blast terkirim!"); }, 2000);
-                  }} 
-                  className="w-full py-5 bg-emerald-600 text-white rounded-3xl font-black shadow-xl shadow-emerald-200"
-                >Kirim Blast ke {contacts.length} Kontak</button>
-            </div>
-          </div>
+          <BlastView 
+            contacts={contacts} 
+            baileysStatus={baileysStatus} 
+            isSocketConnected={isSocketConnected}
+            onBlast={(text, jids) => socketRef.current?.emit("whatsapp_blast", { jids, text })}
+          />
         )}
 
         {activeTab === 'knowledge' && (
           <KnowledgeView 
-            knowledgeBase={config.knowledgeBase} newKItem={newKItem} setNewKItem={setNewKItem}
+            knowledgeBase={config.knowledgeBase} 
+            setKnowledgeBase={(newKb) => setConfig(prev => ({ ...prev, knowledgeBase: newKb }))}
+            newKItem={newKItem} setNewKItem={setNewKItem}
             editingKItem={editingKItem} onAddOrUpdate={handleAddOrUpdateKItem}
             onEdit={(item) => { setNewKItem({category: item.category, content: item.content}); setEditingKItem(item.id); }}
             onCancelEdit={() => { setEditingKItem(null); setNewKItem({category: '', content: ''}); }}
@@ -216,26 +338,14 @@ const App: React.FC = () => {
         )}
 
         {activeTab === 'settings' && (
-          <div className="p-10 max-w-5xl mx-auto w-full space-y-8 overflow-y-auto pb-20">
-            <h2 className="text-2xl font-black uppercase tracking-tight">System Settings</h2>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm space-y-4">
-                <h3 className="text-xs font-black text-slate-400 uppercase">Business Profile</h3>
-                <input value={config.businessName} onChange={e => setConfig({...config, businessName: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-sm" placeholder="Nama Bisnis" />
-                <textarea value={config.description} onChange={e => setConfig({...config, description: e.target.value})} className="w-full p-4 bg-slate-50 rounded-2xl text-sm h-24" placeholder="Deskripsi Bisnis" />
-                <button onClick={() => setActiveTab('knowledge')} className="w-full py-3 bg-emerald-50 text-emerald-600 rounded-xl font-bold text-xs uppercase">Edit Knowledge Base</button>
-              </div>
-              <div className="bg-white p-8 rounded-[2.5rem] border shadow-sm space-y-4">
-                <h3 className="text-xs font-black text-slate-400 uppercase">Credentials</h3>
-                <input type={showApiKey ? "text" : "password"} value={geminiApiKey} onChange={e => setGeminiApiKey(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-sm" placeholder="Gemini API Key" />
-                <button onClick={() => setShowApiKey(!showApiKey)} className="text-[10px] font-black uppercase text-slate-400">{showApiKey ? "Hide" : "Show"}</button>
-                <div className="pt-4 space-y-2">
-                  <input value={backendUrl} onChange={e => setBackendUrl(e.target.value)} className="w-full p-4 bg-slate-50 rounded-2xl text-sm" placeholder="Backend URL" />
-                  <button onClick={() => window.location.reload()} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-xs uppercase">Save & Reload</button>
-                </div>
-              </div>
-            </div>
-          </div>
+          <SettingsView 
+            config={config} setConfig={setConfig} 
+            geminiApiKey={geminiApiKey} setGeminiApiKey={setGeminiApiKey}
+            showApiKey={showApiKey} setShowApiKey={setShowApiKey}
+            backendUrl={backendUrl} setBackendUrl={setBackendUrl}
+            isSocketConnected={isSocketConnected} isResetting={isResetting}
+            onReconnect={handleReconnect} onTabChange={setActiveTab}
+          />
         )}
       </main>
 

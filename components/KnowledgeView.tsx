@@ -1,10 +1,11 @@
 
-import React from 'react';
+import React, { useRef } from 'react';
 import { Icons } from '../constants';
 import { KnowledgeItem } from '../types';
 
 interface KnowledgeViewProps {
   knowledgeBase: KnowledgeItem[];
+  setKnowledgeBase: (items: KnowledgeItem[]) => void;
   newKItem: { category: string, content: string };
   setNewKItem: (item: any) => void;
   editingKItem: string | null;
@@ -15,15 +16,84 @@ interface KnowledgeViewProps {
 }
 
 export const KnowledgeView: React.FC<KnowledgeViewProps> = ({
-  knowledgeBase, newKItem, setNewKItem, editingKItem,
+  knowledgeBase, setKnowledgeBase, newKItem, setNewKItem, editingKItem,
   onAddOrUpdate, onEdit, onCancelEdit, onDelete
 }) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleExport = () => {
+    const dataStr = JSON.stringify(knowledgeBase, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `knowledge_base_${new Date().toISOString().split('T')[0]}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+  };
+
+  const handleImport = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const json = JSON.parse(e.target?.result as string);
+        if (Array.isArray(json)) {
+          // Basic validation to check if items have required fields
+          const validItems = json.filter(item => item.category && item.content);
+          if (confirm(`Impor ${validItems.length} data pengetahuan baru?`)) {
+            setKnowledgeBase([...knowledgeBase, ...validItems.map(item => ({
+              ...item,
+              id: item.id || Date.now().toString() + Math.random().toString(36).substr(2, 5)
+            }))]);
+          }
+        } else {
+          alert("Format file tidak valid. Pastikan file JSON berisi array data.");
+        }
+      } catch (err) {
+        alert("Gagal membaca file. Pastikan file dalam format JSON yang benar.");
+      }
+    };
+    reader.readAsText(file);
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   return (
     <div className="p-10 max-w-5xl mx-auto w-full space-y-8 overflow-y-auto max-h-full pb-20">
       <div className="flex justify-between items-center">
-          <h2 className="text-2xl font-black uppercase tracking-tight">Knowledge Base</h2>
-          <div className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-2xl font-black text-xs uppercase tracking-widest border border-emerald-100">
-              {knowledgeBase.length} Items
+          <div>
+            <h2 className="text-2xl font-black uppercase tracking-tight">Knowledge Base</h2>
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Latih AI Toko Anda</p>
+          </div>
+          <div className="flex items-center space-x-2">
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleImport} 
+                accept=".json" 
+                className="hidden" 
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center space-x-2 px-4 py-2 bg-white text-slate-600 rounded-xl font-bold text-xs uppercase border hover:bg-slate-50 transition-all shadow-sm"
+              >
+                <Icons.FileText />
+                <span>Import</span>
+              </button>
+              <button 
+                onClick={handleExport}
+                className="flex items-center space-x-2 px-4 py-2 bg-white text-emerald-600 rounded-xl font-bold text-xs uppercase border border-emerald-100 hover:bg-emerald-50 transition-all shadow-sm"
+              >
+                <Icons.History />
+                <span>Export</span>
+              </button>
+              <div className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-lg shadow-emerald-100">
+                  {knowledgeBase.length} Items
+              </div>
           </div>
       </div>
       
