@@ -50,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <SidebarItem icon={<Icons.MessageCircle />} label="Chats" active={activeTab === 'chats'} onClick={() => setActiveTab('chats')} />
         <SidebarItem icon={<Icons.Users />} label="Contacts List" active={activeTab === 'contacts'} onClick={() => setActiveTab('contacts')} />
         <SidebarItem icon={<Icons.Blast />} label="Blast (Bulk)" active={activeTab === 'blast'} onClick={() => setActiveTab('blast')} />
+        <SidebarItem icon={<Icons.History />} label="Campaign History" active={activeTab === 'history'} onClick={() => setActiveTab('history')} />
         <SidebarItem icon={<Icons.Bot />} label="Knowledge Base" active={activeTab === 'knowledge'} onClick={() => setActiveTab('knowledge')} />
         <SidebarItem icon={<Icons.Settings />} label="Settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       </nav>

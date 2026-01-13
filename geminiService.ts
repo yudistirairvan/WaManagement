@@ -1,12 +1,12 @@
 
 import { GoogleGenAI } from "@google/genai";
-import { SMEConfig } from "./types";
+import { SMEConfig, KnowledgeItem } from "./types";
 
 export const getAIResponse = async (
   userInput: string, 
   config: SMEConfig, 
   customApiKey?: string | null
-): Promise<string | null> => {
+): Promise<{ text: string, media?: { url: string, type: 'image' | 'video' }, buttons?: string[] } | null> => {
   const apiKey = customApiKey || process.env.API_KEY;
   
   if (!apiKey) {
@@ -15,12 +15,15 @@ export const getAIResponse = async (
   }
 
   try {
-    // Initialize with named parameter as per guidelines
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
-    // Format knowledge base untuk konteks
     const knowledgeContext = config.knowledgeBase
-      .map(item => `[${item.category}]: ${item.content}`)
+      .map(item => {
+        let text = `[ID: ${item.id}][Category: ${item.category}]: ${item.content}`;
+        if (item.mediaUrl) text += ` (Media Available: ${item.mediaType})`;
+        if (item.buttons?.length) text += ` (Buttons Available: ${item.buttons.join(', ')})`;
+        return text;
+      })
       .join('\n');
 
     const systemInstruction = `Anda adalah asisten WhatsApp resmi untuk "${config.businessName}". 
@@ -30,47 +33,55 @@ Gaya Bicara: ${config.autoReplyPrompt}.
 DATA RESMI TOKO (KNOWLEDGE BASE):
 ${knowledgeContext || "Tidak ada data khusus yang tersimpan."}
 
-ATURAN JAWABAN:
-1. PERIKSA DATA RESMI: Jika pertanyaan pelanggan dapat dijawab menggunakan DATA RESMI TOKO di atas, berikan jawaban langsung tanpa catatan tambahan.
-2. JAWABAN UMUM: Jika informasi TIDAK DITEMUKAN di DATA RESMI TOKO, Anda boleh menjawab menggunakan pengetahuan umum Anda yang relevan dengan bisnis ini. Namun, Anda WAJIB menambahkan catatan disclaimer di baris paling bawah.
-3. FORMAT DISCLAIMER: Gunakan garis pemisah dan teks berikut tepat di bagian akhir jawaban umum:
----
-(Catatan: Jawaban ini dihasilkan oleh AI asisten. Mohon hubungi admin langsung jika memerlukan informasi resmi lebih lanjut.)
+TUGAS ANDA:
+1. Jawab pertanyaan user dengan ramah.
+2. Jika jawaban ada di DATA RESMI TOKO, gunakan informasi tersebut.
+3. FORMAT OUTPUT: Anda WAJIB memberikan jawaban dalam format JSON mentah (bukan markdown) agar sistem dashboard bisa memprosesnya.
+Contoh Format JSON:
+{
+  "text": "Jawaban Anda di sini...",
+  "knowledgeId": "ID item dari data resmi jika ada, jika tidak kosongkan",
+  "disclaimer": true/false (true jika menggunakan pengetahuan umum di luar data resmi)
+}
 
-4. BATASAN: Jika pertanyaan tidak sopan atau sangat jauh dari konteks bisnis, jawab: "Maaf, saya tidak memiliki informasi mengenai hal tersebut."
-5. Gunakan Bahasa Indonesia yang natural dan ramah.`;
+Jika disclaimer true, tambahkan catatan di akhir field 'text'.`;
 
-    // Use ai.models.generateContent directly
+    // Updated to use ai.models.generateContent according to guidelines
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: userInput,
       config: {
         systemInstruction: systemInstruction,
+        responseMimeType: "application/json",
         temperature: 0.4,
-        topP: 0.9,
       },
     });
 
-    // Access .text property directly (not a method)
+    // Access .text property directly as per guidelines
     const resultText = response.text?.trim();
-    
-    if (!resultText) {
-      console.warn("Gemini Service: Empty response text received");
-      return null;
-    }
+    if (!resultText) return null;
 
-    return resultText;
-  } catch (error: any) {
-    console.error("Gemini API Error Detail:", {
-      message: error?.message,
-      status: error?.status,
-    });
-    
-    // Memberikan feedback jika terjadi error server
-    if (error?.message?.includes('500') || error?.message?.includes('503')) {
-      return "Sistem AI kami sedang mengalami gangguan teknis (Server Busy). Mohon tunggu beberapa saat lagi atau hubungi admin secara manual.";
+    try {
+      const parsed = JSON.parse(resultText);
+      const foundItem = config.knowledgeBase.find(k => k.id === parsed.knowledgeId);
+      
+      let finalResponse = {
+        text: parsed.text,
+        media: foundItem?.mediaUrl ? { url: foundItem.mediaUrl, type: foundItem.mediaType as any } : undefined,
+        buttons: foundItem?.buttons || undefined
+      };
+
+      if (parsed.disclaimer) {
+        finalResponse.text += "\n\n---\n(Catatan: Jawaban ini dihasilkan oleh AI asisten. Mohon hubungi admin jika memerlukan info resmi.)";
+      }
+
+      return finalResponse;
+    } catch (e) {
+      // Fallback if not valid JSON
+      return { text: resultText };
     }
-    
-    return null; 
+  } catch (error: any) {
+    console.error("Gemini API Error:", error);
+    return { text: "Maaf, sistem AI sedang sibuk. Mohon coba lagi nanti." };
   }
 };

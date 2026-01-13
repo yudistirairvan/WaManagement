@@ -15,6 +15,7 @@ export const getAIResponse = async (
   }
 
   try {
+    // Initialize with named parameter as per guidelines
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
     // Format knowledge base untuk konteks
@@ -39,6 +40,7 @@ ATURAN JAWABAN:
 4. BATASAN: Jika pertanyaan tidak sopan atau sangat jauh dari konteks bisnis, jawab: "Maaf, saya tidak memiliki informasi mengenai hal tersebut."
 5. Gunakan Bahasa Indonesia yang natural dan ramah.`;
 
+    // Use ai.models.generateContent directly
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: userInput,
@@ -49,6 +51,7 @@ ATURAN JAWABAN:
       },
     });
 
+    // Access .text property directly (not a method)
     const resultText = response.text?.trim();
     
     if (!resultText) {

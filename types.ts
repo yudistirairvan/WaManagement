@@ -15,6 +15,9 @@ export interface Message {
   timestamp: Date;
   isMine: boolean;
   status?: 'sent' | 'received' | 'read';
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
+  buttons?: string[];
 }
 
 export interface Contact {
@@ -25,11 +28,19 @@ export interface Contact {
   unreadCount: number;
 }
 
+export interface CampaignGroup {
+  id: string;
+  name: string;
+  contacts: string[]; // Array of contact IDs (JIDs)
+  createdAt: Date;
+}
+
 export interface BlastHistory {
   id: string;
+  campaignName: string;
   message: string;
   timestamp: Date;
-  recipientCount: number;
+  recipients: string[]; // List of JIDs
   status: 'completed' | 'failed' | 'processing';
 }
 
@@ -37,14 +48,9 @@ export interface KnowledgeItem {
   id: string;
   category: string;
   content: string;
-}
-
-export interface ActivityLog {
-  id: string;
-  type: 'system' | 'ai' | 'blast' | 'contact' | 'auth';
-  action: string;
-  user: string;
-  timestamp: Date;
+  mediaUrl?: string;
+  mediaType?: 'image' | 'video';
+  buttons?: string[]; // List of button labels
 }
 
 export interface SMEConfig {
