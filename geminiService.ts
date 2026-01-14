@@ -7,6 +7,7 @@ export const getAIResponse = async (
   config: SMEConfig, 
   customApiKey?: string | null
 ): Promise<{ text: string, media?: { url: string, type: 'image' | 'video' }, buttons?: string[] } | null> => {
+  // Use the API key from environment variable as per guidelines
   const apiKey = customApiKey || process.env.API_KEY;
   
   if (!apiKey) {
@@ -15,6 +16,7 @@ export const getAIResponse = async (
   }
 
   try {
+    // Correct initialization using named parameter
     const ai = new GoogleGenAI({ apiKey: apiKey });
 
     const knowledgeContext = config.knowledgeBase
@@ -46,10 +48,10 @@ Contoh Format JSON:
 
 Jika disclaimer true, tambahkan catatan di akhir field 'text'.`;
 
-    // Updated to use ai.models.generateContent according to guidelines
+    // Using ai.models.generateContent with model and prompt as per guidelines
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: userInput,
+      contents: [{ parts: [{ text: userInput }] }],
       config: {
         systemInstruction: systemInstruction,
         responseMimeType: "application/json",
@@ -57,7 +59,7 @@ Jika disclaimer true, tambahkan catatan di akhir field 'text'.`;
       },
     });
 
-    // Access .text property directly as per guidelines
+    // Access .text property directly (not as a method)
     const resultText = response.text?.trim();
     if (!resultText) return null;
 

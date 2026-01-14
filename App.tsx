@@ -22,13 +22,10 @@ const App: React.FC = () => {
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
-  // Added missing state variables for login
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
   const [loginError, setLoginError] = useState<string | null>(null);
-
   const [backendUrl, setBackendUrl] = useState(() => localStorage.getItem('sme_backend_url') || DEFAULT_SOCKET_URL);
   const [geminiApiKey, setGeminiApiKey] = useState(() => localStorage.getItem('sme_gemini_key') || '');
-  const [showApiKey, setShowApiKey] = useState(false);
   const [activeTab, setActiveTab] = useState<'chats' | 'blast' | 'history' | 'knowledge' | 'settings' | 'contacts'>(() => {
     const savedTab = localStorage.getItem('sme_active_tab');
     return (savedTab as any) || 'chats';
@@ -48,9 +45,11 @@ const App: React.FC = () => {
   const [baileysStatus, setBaileysStatus] = useState<'initial' | 'qr' | 'connecting' | 'connected' | 'error'>('initial');
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [isSocketConnected, setIsSocketConnected] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
   const [isSyncingContacts, setIsSyncingContacts] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  
+  // State Monitoring Transmisi
+  const [transmissionLogs, setTransmissionLogs] = useState<{id: string, status: string, msg: string}[]>([]);
 
   const [contacts, setContacts] = useState<Contact[]>(() => {
     const savedContacts = localStorage.getItem('sme_contacts_cache');
@@ -61,11 +60,16 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('sme_bot_config');
     return saved ? JSON.parse(saved) : {
       businessName: 'Toko Saya',
-      description: 'UMKM Bergerak di bidang jasa/produk',
+      description: 'UMKM Manager AI',
       autoReplyEnabled: true,
       autoReplyPrompt: 'Ramah dan membantu',
       knowledgeBase: []
     };
+  });
+
+  const [messages, setMessages] = useState<Record<string, Message[]>>(() => {
+    const saved = localStorage.getItem('sme_chat_history');
+    return saved ? JSON.parse(saved) : {};
   });
 
   const configRef = useRef(config);
@@ -79,83 +83,73 @@ const App: React.FC = () => {
   useEffect(() => { configRef.current = config; localStorage.setItem('sme_bot_config', JSON.stringify(config)); }, [config]);
   useEffect(() => { if (contacts.length > 0) localStorage.setItem('sme_contacts_cache', JSON.stringify(contacts)); }, [contacts]);
   useEffect(() => { apiKeyRef.current = geminiApiKey; localStorage.setItem('sme_gemini_key', geminiApiKey); }, [geminiApiKey]);
+  useEffect(() => { localStorage.setItem('sme_chat_history', JSON.stringify(messages)); }, [messages]);
 
-  const [messages, setMessages] = useState<Record<string, Message[]>>({});
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [inputText, setInputText] = useState('');
-  const [newKItem, setNewKItem] = useState<Partial<KnowledgeItem>>({ category: '', content: '', buttons: [], mediaUrl: '', mediaType: 'image' });
-  const [editingKItem, setEditingKItem] = useState<string | null>(null);
+  const ensureJid = (id: string) => {
+    if (id.includes('@')) return id;
+    return `${id.replace(/\D/g, '')}@s.whatsapp.net`;
+  };
 
-  const sendMessage = useCallback((text: string, contactId: string, isAi = false, media?: any, buttons?: string[]) => {
-    if (!text && !media) return;
-    if (!isAi && socketRef.current?.connected) {
-      socketRef.current.emit("send_message", { jid: contactId, text, media, buttons });
+  const sendMessage = useCallback((text: string, contactId: string, isAi = false) => {
+    if (!text) return;
+    const targetJid = ensureJid(contactId);
+
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("send_message", { jid: targetJid, text });
     }
+
     const newMessage: Message = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
       sender: isAi ? configRef.current.businessName : 'Admin',
-      text, timestamp: new Date(), isMine: true,
-      mediaUrl: media?.url,
-      mediaType: media?.type,
-      buttons: buttons
+      text, timestamp: new Date(), isMine: true
     };
     setMessages(prev => ({ ...prev, [contactId]: [...(prev[contactId] || []), newMessage] }));
-    if (!isAi) setInputText('');
   }, []);
-
-  const triggerContactSync = useCallback(() => {
-    if (socketRef.current?.connected) {
-      setIsSyncingContacts(true);
-      socketRef.current.emit("whatsapp_get_contacts");
-      setTimeout(() => setIsSyncingContacts(false), 20000);
-    }
-  }, []);
-
-  const handleReconnect = useCallback(() => {
-    if (!socketRef.current?.connected) return;
-    if (confirm("Ganti akun WhatsApp? Sesi lama akan dihapus.")) {
-      setIsResetting(true); setQrCode(null); setBaileysStatus('connecting'); setIsScannerOpen(true);
-      socketRef.current.emit("whatsapp_logout");
-      setTimeout(() => {
-        socketRef.current?.emit("whatsapp_reset");
-        setTimeout(() => { socketRef.current?.emit("whatsapp_get_status"); setIsResetting(false); }, 2000);
-      }, 2000);
-    }
-  }, []);
-
-  const handleAddOrUpdateKItem = () => {
-    if (!newKItem.category || !newKItem.content) return;
-    if (editingKItem) {
-      setConfig(prev => ({
-        ...prev,
-        knowledgeBase: prev.knowledgeBase.map(item => item.id === editingKItem ? { ...item, ...newKItem } as KnowledgeItem : item)
-      }));
-      setEditingKItem(null);
-    } else {
-      setConfig(prev => ({ ...prev, knowledgeBase: [...prev.knowledgeBase, { id: Date.now().toString(), ...newKItem } as KnowledgeItem] }));
-    }
-    setNewKItem({ category: '', content: '', buttons: [], mediaUrl: '', mediaType: 'image' });
-  };
 
   useEffect(() => {
     if (!currentUser) return;
-    const newSocket = io(backendUrl, { transports: ['polling', 'websocket'], reconnection: true });
+    
+    const newSocket = io(backendUrl, { 
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000
+    });
     socketRef.current = newSocket;
 
-    newSocket.on("connect", () => { setIsSocketConnected(true); newSocket.emit("whatsapp_get_status"); });
-    newSocket.on("disconnect", () => { setIsSocketConnected(false); setBaileysStatus('initial'); });
-    newSocket.on("whatsapp_qr", (qr: string) => { setQrCode(qr); setBaileysStatus('qr'); setIsScannerOpen(true); });
-    newSocket.on("whatsapp_status", (s: string) => {
-      const norm = s === 'open' ? 'connected' : s;
+    newSocket.on("connect", () => { 
+      setIsSocketConnected(true); 
+      newSocket.emit("whatsapp_get_status"); 
+    });
+
+    newSocket.on("disconnect", () => setIsSocketConnected(false));
+
+    newSocket.on("queue_log", (log: any) => {
+      setTransmissionLogs(prev => {
+        // System logs stay, specific message logs get updated if the same ID comes again
+        const filtered = prev.filter(p => p.id !== log.id || log.id === 'sys');
+        return [log, ...filtered].slice(0, 10);
+      });
+    });
+
+    newSocket.on("whatsapp_qr", (qr: string) => { 
+      setQrCode(qr); 
+      setBaileysStatus('qr'); 
+      setIsScannerOpen(true); 
+    });
+
+    newSocket.on("whatsapp_status", (status: string) => {
+      const norm = status === 'open' ? 'connected' : status;
       setBaileysStatus(norm as any);
       if (norm === 'connected') { setIsScannerOpen(false); setQrCode(null); }
     });
+
     newSocket.on("whatsapp_contacts", (data: any) => {
       setIsSyncingContacts(false);
       if (Array.isArray(data)) {
-        setContacts(data.map(c => ({ id: c.id, name: c.name || c.phone, phone: c.phone, unreadCount: 0 })));
+        setContacts(data.map(c => ({ id: c.id, name: c.name || c.id.split('@')[0], phone: c.id.split('@')[0], unreadCount: 0 })));
       }
     });
+
     newSocket.on("whatsapp_message", async (msg: any) => {
       const contactId = msg.key?.remoteJid;
       if (!contactId || msg.key?.fromMe) return;
@@ -163,16 +157,27 @@ const App: React.FC = () => {
       if (!text || processedMessageIds.current.has(msg.key.id)) return;
       processedMessageIds.current.add(msg.key.id);
       
-      setMessages(prev => ({ ...prev, [contactId]: [...(prev[contactId] || []), { id: msg.key.id, sender: contactId.split('@')[0], text, timestamp: new Date(), isMine: false }] }));
+      setMessages(prev => ({ 
+        ...prev, 
+        [contactId]: [...(prev[contactId] || []), { 
+          id: msg.key.id, 
+          sender: contactId.split('@')[0], 
+          text, 
+          timestamp: new Date(), 
+          isMine: false 
+        }] 
+      }));
       
       if (configRef.current.autoReplyEnabled) {
         const aiRes = await getAIResponse(text, configRef.current, apiKeyRef.current);
-        if (aiRes) { sendMessage(aiRes.text, contactId, true, aiRes.media, aiRes.buttons); }
+        if (aiRes) { sendMessage(aiRes.text, contactId, true); }
       }
     });
 
-    return () => { newSocket.disconnect(); socketRef.current = null; };
+    return () => { newSocket.close(); };
   }, [currentUser, backendUrl, sendMessage]);
+
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
 
   if (!currentUser) {
     return (
@@ -188,7 +193,7 @@ const App: React.FC = () => {
           }} className="space-y-4">
             <input type="text" placeholder="Username" className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm" value={loginForm.username} onChange={e => setLoginForm({...loginForm, username: e.target.value})} />
             <input type="password" placeholder="Password" className="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl text-sm" value={loginForm.password} onChange={e => setLoginForm({...loginForm, password: e.target.value})} />
-            {loginError && <p className="text-red-500 text-xs font-bold">{loginError}</p>}
+            {loginError && <p className="text-red-500 text-[10px] font-bold">{loginError}</p>}
             <button type="submit" className="w-full py-5 bg-emerald-600 text-white rounded-[1.5rem] font-bold">Masuk</button>
           </form>
         </div>
@@ -198,37 +203,86 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen overflow-hidden bg-white font-sans text-slate-900">
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} isSocketConnected={isSocketConnected} baileysStatus={baileysStatus} isResetting={isResetting} onReconnect={handleReconnect} onLogout={() => { setCurrentUser(null); localStorage.removeItem('sme_user_session'); }} />
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} isSocketConnected={isSocketConnected} baileysStatus={baileysStatus} isResetting={isResetting} onReconnect={() => socketRef.current?.emit("whatsapp_logout")} onLogout={() => { setCurrentUser(null); localStorage.removeItem('sme_user_session'); }} />
       <main className="flex-1 flex flex-col relative bg-slate-50 overflow-hidden">
-        {activeTab === 'chats' && <ChatView contacts={contacts} messages={messages} selectedContact={selectedContact} setSelectedContact={setSelectedContact} searchTerm={searchTerm} setSearchTerm={setSearchTerm} isSyncingContacts={isSyncingContacts} onSyncContacts={triggerContactSync} inputText={inputText} setInputText={setInputText} onSendMessage={sendMessage} />}
-        {activeTab === 'contacts' && <ContactsView contacts={contacts} isSyncing={isSyncingContacts} onSync={triggerContactSync} setContacts={setContacts} onSelectChat={(c) => { setSelectedContact(c); setActiveTab('chats'); }} />}
+        
+        {/* Transmission Log Monitor UI */}
+        {transmissionLogs.length > 0 && (
+          <div className="absolute top-4 right-4 z-[40] w-80 bg-slate-900/90 text-white p-5 rounded-[2rem] shadow-2xl border border-white/10 backdrop-blur-xl animate-in fade-in slide-in-from-right-4">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Live Status Antrean</span>
+              </div>
+              <button onClick={() => setTransmissionLogs([])} className="text-[10px] text-slate-500 hover:text-white uppercase font-bold">Clear</button>
+            </div>
+            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+              {transmissionLogs.map((log, i) => (
+                <div key={`${log.id}-${i}`} className={`flex items-start space-x-3 p-2 rounded-xl border ${log.status === 'error' ? 'bg-red-500/10 border-red-500/20' : log.status === 'success' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-white/5 border-white/5'} animate-in fade-in slide-in-from-top-1`}>
+                  <div className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${log.status === 'success' ? 'bg-emerald-500' : log.status === 'error' ? 'bg-red-500' : log.status === 'waiting' ? 'bg-amber-500' : 'bg-blue-400 animate-pulse'}`} />
+                  <div className="flex-1">
+                    <p className="text-[10px] font-mono text-slate-100 break-words leading-relaxed">{log.msg}</p>
+                    <span className="text-[8px] font-bold text-slate-500 uppercase">{new Date().toLocaleTimeString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'chats' && (
+          <ChatView 
+            contacts={contacts} 
+            messages={messages} 
+            setMessages={setMessages}
+            selectedContact={selectedContact} 
+            setSelectedContact={setSelectedContact} 
+            searchTerm={''} 
+            setSearchTerm={() => {}} 
+            isSyncingContacts={isSyncingContacts} 
+            onSyncContacts={() => socketRef.current?.emit("whatsapp_get_contacts")} 
+            inputText={''} 
+            setInputText={() => {}} 
+            onSendMessage={sendMessage} 
+          />
+        )}
+        {activeTab === 'contacts' && <ContactsView contacts={contacts} isSyncing={isSyncingContacts} onSync={() => socketRef.current?.emit("whatsapp_get_contacts")} onSelectChat={(c) => { setSelectedContact(c); setActiveTab('chats'); }} setContacts={setContacts} />}
         {activeTab === 'blast' && <BlastView contacts={contacts} campaignGroups={campaignGroups} setCampaignGroups={setCampaignGroups} blastHistory={blastHistory} setBlastHistory={setBlastHistory} baileysStatus={baileysStatus} isSocketConnected={isSocketConnected} onBlast={(text, jids) => socketRef.current?.emit("whatsapp_blast", { jids, text })} />}
         {activeTab === 'history' && <CampaignHistoryView blastHistory={blastHistory} setBlastHistory={setBlastHistory} contacts={contacts} onResendBlast={(text, jids) => socketRef.current?.emit("whatsapp_blast", { jids, text })} />}
         {activeTab === 'knowledge' && (
           <KnowledgeView 
-            knowledgeBase={config.knowledgeBase} setKnowledgeBase={(kb) => setConfig({...config, knowledgeBase: kb})}
-            newKItem={newKItem} setNewKItem={setNewKItem} editingKItem={editingKItem}
-            onAddOrUpdate={handleAddOrUpdateKItem} onEdit={(i) => { setNewKItem(i); setEditingKItem(i.id); }}
-            onCancelEdit={() => { setEditingKItem(null); setNewKItem({category: '', content: '', buttons: [], mediaUrl: '', mediaType: 'image'}); }}
-            onDelete={(id) => setConfig({...config, knowledgeBase: config.knowledgeBase.filter(k => k.id !== id)})}
+            knowledgeBase={config.knowledgeBase} 
+            setKnowledgeBase={(kb) => setConfig({...config, knowledgeBase: kb})} 
+            newKItem={{}} 
+            setNewKItem={() => {}} 
+            editingKItem={null} 
+            onAddOrUpdate={() => {}} 
+            onEdit={() => {}} 
+            onCancelEdit={() => {}} 
+            onDelete={() => {}} 
           />
         )}
-        {activeTab === 'settings' && <SettingsView config={config} setConfig={setConfig} geminiApiKey={geminiApiKey} setGeminiApiKey={setGeminiApiKey} showApiKey={showApiKey} setShowApiKey={setShowApiKey} backendUrl={backendUrl} setBackendUrl={setBackendUrl} isSocketConnected={isSocketConnected} isResetting={isResetting} onReconnect={handleReconnect} onTabChange={setActiveTab} />}
+        {activeTab === 'settings' && <SettingsView config={config} setConfig={setConfig} geminiApiKey={geminiApiKey} setGeminiApiKey={setGeminiApiKey} showApiKey={false} setShowApiKey={() => {}} backendUrl={backendUrl} setBackendUrl={setBackendUrl} isSocketConnected={isSocketConnected} isResetting={isResetting} onReconnect={() => {}} onTabChange={setActiveTab} />}
       </main>
 
       {isScannerOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/95 backdrop-blur-2xl p-6">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/95 backdrop-blur-2xl p-6">
           <div className="bg-white p-12 rounded-[3.5rem] text-center max-w-sm w-full shadow-2xl relative">
-            <h2 className="text-2xl font-black mb-2 text-slate-800">Scan WhatsApp</h2>
+            <h2 className="text-2xl font-black mb-2 text-slate-800 uppercase">Scan WhatsApp</h2>
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-8">Buka WA &gt; Perangkat Tertaut</p>
             <div className="bg-slate-50 p-6 border rounded-[2rem] mb-8 min-h-[250px] flex items-center justify-center">
-              {qrCode ? <img src={qrCode} alt="QR" className="w-full rounded-lg shadow-sm" /> : <div className="w-14 h-14 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>}
+              {qrCode ? <img src={qrCode} alt="QR" className="w-full rounded-lg shadow-sm" /> : (
+                <div className="flex flex-col items-center">
+                   <div className="w-14 h-14 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                   <span className="text-[10px] font-black text-slate-400 uppercase">Menunggu QR...</span>
+                </div>
+              )}
             </div>
-            <button onClick={() => setIsScannerOpen(false)} className="w-full py-4 text-xs font-black text-slate-400 uppercase border rounded-2xl">Tutup</button>
+            <button onClick={() => setIsScannerOpen(false)} className="w-full py-4 text-xs font-black text-slate-400 uppercase border rounded-2xl hover:bg-slate-50 transition-colors">Tutup</button>
           </div>
         </div>
       )}
     </div>
   );
 };
-
 export default App;

@@ -31,6 +31,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   );
 
   const handleExportHistory = () => {
+    if (Object.keys(messages).length === 0) return alert("Belum ada history untuk diekspor.");
     const dataStr = JSON.stringify(messages, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
     const exportFileDefaultName = `chat_history_${new Date().toISOString().split('T')[0]}.json`;
@@ -48,9 +49,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
       try {
         const json = JSON.parse(e.target?.result as string);
         if (typeof json === 'object' && !Array.isArray(json)) {
-          if (confirm("Ganti history chat lokal dengan file ini?")) {
+          if (confirm("Ganti history chat lokal dengan file ini? History saat ini akan tertimpa.")) {
             setMessages(json);
+            localStorage.setItem('sme_chat_history', JSON.stringify(json));
           }
+        } else {
+          alert("Format file tidak valid.");
         }
       } catch (err) { alert("Gagal membaca file JSON."); }
     };
@@ -59,15 +63,17 @@ export const ChatView: React.FC<ChatViewProps> = ({
   };
 
   const clearCurrentHistory = () => {
-    if (selectedContact && confirm(`Hapus semua pesan untuk ${selectedContact.name}?`)) {
+    if (selectedContact && confirm(`Hapus semua pesan untuk ${selectedContact.name}? Tindakan ini permanen.`)) {
       const updatedMessages = { ...messages };
       delete updatedMessages[selectedContact.id];
       setMessages(updatedMessages);
+      localStorage.setItem('sme_chat_history', JSON.stringify(updatedMessages));
     }
   };
 
   return (
     <div className="flex flex-1 overflow-hidden">
+      {/* Contact List Sidebar */}
       <div className="w-80 border-r bg-white flex flex-col">
         <div className="p-6 border-b space-y-4">
           <div className="flex items-center justify-between">
@@ -101,8 +107,8 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         <span className="bg-emerald-500 text-white text-[10px] px-2 py-0.5 rounded-full font-black animate-pulse">{contact.unreadCount}</span>
                       )}
                     </div>
-                    <p className="text-xs text-slate-500 truncate mt-0.5">
-                      {lastMsg ? lastMsg.text : (contact.lastMessage || contact.phone)}
+                    <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">
+                      {lastMsg ? lastMsg.text : (contact.lastMessage || 'Tidak ada pesan')}
                     </p>
                   </div>
                 </div>
@@ -113,50 +119,56 @@ export const ChatView: React.FC<ChatViewProps> = ({
           )}
         </div>
 
+        {/* Global History Actions */}
         <div className="p-4 bg-slate-50 border-t space-y-2">
-            <p className="text-[10px] font-black text-slate-400 uppercase text-center mb-1">Backup History</p>
+            <p className="text-[10px] font-black text-slate-400 uppercase text-center mb-1 tracking-tighter">Pencadangan Percakapan</p>
             <div className="flex space-x-2">
               <input type="file" ref={fileInputRef} onChange={handleImportHistory} className="hidden" accept=".json" />
-              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-2 bg-white border rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-100">Import</button>
-              <button onClick={handleExportHistory} className="flex-1 py-2 bg-white border rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-100">Export</button>
+              <button onClick={() => fileInputRef.current?.click()} className="flex-1 py-2.5 bg-white border rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-100 shadow-sm transition-all active:scale-95">Import</button>
+              <button onClick={handleExportHistory} className="flex-1 py-2.5 bg-white border rounded-xl text-[9px] font-black uppercase tracking-wider hover:bg-slate-100 shadow-sm transition-all active:scale-95">Export</button>
             </div>
         </div>
       </div>
 
+      {/* Conversation Pane */}
       <div className="flex-1 flex flex-col overflow-hidden bg-white">
         {selectedContact ? (
           <>
             <div className="p-4 border-b flex items-center justify-between shadow-sm z-10 bg-white">
               <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xs">{(selectedContact.name || selectedContact.phone)[0]}</div>
+                  <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-xs">{(selectedContact.name || selectedContact.phone)[0]}</div>
                   <div className="flex flex-col">
-                      <span className="font-bold text-slate-800 leading-none">{selectedContact.name || selectedContact.phone}</span>
-                      <span className="text-[9px] text-slate-400 font-bold mt-1 uppercase tracking-wider">{selectedContact.phone}</span>
+                      <span className="font-black text-slate-800 leading-none text-sm">{selectedContact.name || selectedContact.phone}</span>
+                      <span className="text-[9px] text-emerald-600 font-bold mt-1 uppercase tracking-wider">Online • +{selectedContact.phone}</span>
                   </div>
               </div>
-              <div className="flex items-center space-x-2">
-                 <button onClick={clearCurrentHistory} className="p-2 text-slate-400 hover:text-red-500 transition-colors" title="Hapus Chat"><Icons.FileText /></button>
+              <div className="flex items-center space-x-1">
+                 <button onClick={clearCurrentHistory} className="p-2.5 text-slate-400 hover:text-red-500 transition-colors hover:bg-red-50 rounded-xl" title="Bersihkan Chat Ini">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                 </button>
               </div>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/40">
               {(!messages[selectedContact.id] || messages[selectedContact.id].length === 0) && (
-                <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-2">
-                   <Icons.History />
-                   <p className="text-[10px] font-black uppercase tracking-widest">Belum ada percakapan</p>
+                <div className="h-full flex flex-col items-center justify-center text-slate-300 space-y-3">
+                   <div className="p-4 bg-slate-100 rounded-full animate-bounce">
+                     <Icons.History />
+                   </div>
+                   <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Mulailah percakapan atau muat history</p>
                 </div>
               )}
               
               {(messages[selectedContact.id] || []).map(msg => (
-                <div key={msg.id} className={`flex ${msg.isMine ? 'justify-end' : 'justify-start'}`}>
+                <div key={msg.id} className={`flex ${msg.isMine ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
                   <div className={`max-w-[75%] flex flex-col space-y-1 ${msg.isMine ? 'items-end' : 'items-start'}`}>
-                    <div className={`p-4 rounded-2xl shadow-sm overflow-hidden ${msg.isMine ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border'}`}>
+                    <div className={`p-4 rounded-2xl shadow-sm overflow-hidden ${msg.isMine ? 'bg-emerald-600 text-white rounded-tr-none' : 'bg-white text-slate-800 rounded-tl-none border border-slate-100'}`}>
                       {msg.mediaUrl && (
-                        <div className="mb-3 rounded-xl overflow-hidden">
+                        <div className="mb-3 rounded-xl overflow-hidden border border-white/20">
                           {msg.mediaType === 'video' ? (
-                            <div className="bg-slate-900 aspect-video flex items-center justify-center text-white text-[10px] p-4 uppercase font-black">Video Sent: {msg.mediaUrl}</div>
+                            <div className="bg-slate-900 aspect-video flex items-center justify-center text-white text-[10px] p-4 uppercase font-black text-center">Video Lampiran:<br/>{msg.mediaUrl.split('/').pop()}</div>
                           ) : (
-                            <img src={msg.mediaUrl} alt="Attached" className="max-w-full h-auto" />
+                            <img src={msg.mediaUrl} alt="Lampiran AI" className="max-w-full h-auto" />
                           )}
                         </div>
                       )}
@@ -168,7 +180,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
                             <button 
                               key={i} 
                               disabled 
-                              className={`py-2 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${msg.isMine ? 'bg-white/10 border-white/20 text-white' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
+                              className={`py-2.5 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest border transition-all ${msg.isMine ? 'bg-white/10 border-white/20 text-white' : 'bg-slate-50 border-slate-200 text-slate-600'}`}
                             >
                               {btn}
                             </button>
@@ -176,9 +188,12 @@ export const ChatView: React.FC<ChatViewProps> = ({
                         </div>
                       )}
 
-                      <span className={`text-[9px] block mt-2 ${msg.isMine ? 'text-emerald-100' : 'text-slate-400'}`}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
+                      <div className={`flex items-center space-x-1 mt-2 ${msg.isMine ? 'justify-end text-emerald-100' : 'text-slate-400'}`}>
+                        <span className="text-[9px] font-bold">
+                          {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                        {msg.isMine && <span className="text-[10px]">✓✓</span>}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -190,13 +205,29 @@ export const ChatView: React.FC<ChatViewProps> = ({
                 value={inputText} 
                 onChange={e => setInputText(e.target.value)} 
                 onKeyDown={e => e.key === 'Enter' && onSendMessage(inputText, selectedContact.id)} 
-                className="flex-1 p-4 bg-slate-50 rounded-2xl border-none outline-none text-sm transition-all focus:bg-white focus:ring-2 focus:ring-emerald-500/20" 
-                placeholder="Tulis pesan..." 
+                className="flex-1 p-4 bg-slate-50 rounded-2xl border-none outline-none text-sm font-medium transition-all focus:bg-white focus:ring-4 focus:ring-emerald-500/5 placeholder:text-slate-400" 
+                placeholder="Tulis pesan ke pelanggan..." 
               />
-              <button onClick={() => onSendMessage(inputText, selectedContact.id)} className="p-4 bg-emerald-600 text-white rounded-2xl shadow-lg shadow-emerald-100 hover:scale-105 active:scale-95 transition-all"><Icons.Send /></button>
+              <button 
+                onClick={() => onSendMessage(inputText, selectedContact.id)} 
+                disabled={!inputText.trim()}
+                className="p-4 bg-emerald-600 text-white rounded-2xl shadow-lg shadow-emerald-200 hover:scale-105 active:scale-95 transition-all disabled:bg-slate-200 disabled:shadow-none"
+              >
+                <Icons.Send />
+              </button>
             </div>
           </>
-        ) : <div className="flex-1 flex items-center justify-center text-slate-300 uppercase font-black text-xs tracking-widest bg-slate-50/50">Pilih kontak untuk chat</div>}
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center bg-slate-50/50 space-y-4">
+            <div className="w-20 h-20 bg-white rounded-[2rem] shadow-xl flex items-center justify-center text-emerald-600 border border-emerald-50">
+               <Icons.MessageCircle />
+            </div>
+            <div className="text-center">
+              <p className="text-xs font-black text-slate-800 uppercase tracking-widest">Dashboard Chat Aktif</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase mt-1">Pilih kontak di sebelah kiri untuk mengelola chat</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
